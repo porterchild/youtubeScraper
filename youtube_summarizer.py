@@ -3,6 +3,7 @@ import time
 import requests
 import json
 import re
+import sys
 from dotenv import load_dotenv
 from youtube_transcript_api import YouTubeTranscriptApi
 import httpx
@@ -20,26 +21,12 @@ client = OpenAI(
     http_client=http_client,
 )
 
-CHANNEL_URL = "https://www.youtube.com/@PredictiveHistory/videos"
-
-# Extract channel name from URL
-CHANNEL_NAME = CHANNEL_URL.split('/@')[1].split('/')[0]
-
-def get_latest_video_id(channel_url):
+def get_latest_n_videos(channel_url, n=5):
+    videos = []
     try:
-        if os.path.exists('channel_page.html'):
-            print("Loading from local channel_page.html")
-            with open('channel_page.html', 'r', encoding='utf-8') as f:
-                html = f.read()
-        else:
-            print("Fetching channel page")
-            response = requests.get(channel_url)
-            html = response.text
-
-            # Save HTML for debugging
-            with open('channel_page.html', 'w', encoding='utf-8') as f:
-                f.write(html)
-            print("Saved HTML to channel_page.html for debugging")
+        print("Fetching channel page")
+        response = requests.get(channel_url)
+        html = response.text
 
         match = re.search(r'var ytInitialData = ({.*?});', html, re.DOTALL)
         if match:
@@ -55,9 +42,7 @@ def get_latest_video_id(channel_url):
             print("Rich grid keys:", list(rich_grid.keys()))
             contents = rich_grid['contents']
             print("Number of contents:", len(contents))
-            video_id = None
-            title = None
-            for i, item in enumerate(contents):
+            for i, item in enumerate(contents[:n]):
                 print(f"Item {i} type: {list(item.keys())}")
                 if 'richItemRenderer' in item:
                     rich_item = item['richItemRenderer']
@@ -72,25 +57,56 @@ def get_latest_video_id(channel_url):
                                 title_runs = video_renderer.get('title', {}).get('runs', [])
                                 title = title_runs[0]['text'] if title_runs else video_id
                                 print(f"Found video ID: {video_id}, Title: {title}")
-                                break
+                                videos.append((video_id, title))
                             else:
                                 print(f"Item {i} no videoId in videoRenderer")
                         else:
                             print(f"Item {i} no videoRenderer in renderer")
                     else:
                         print(f"Item {i} no content in rich_item")
-            if video_id:
-                print(f"Latest video ID: {video_id}")
-                return video_id, title
-            else:
-                print("No video found in contents")
-                return None
+                else:
+                    print(f"Item {i} is not richItemRenderer: {list(item.keys())}")
+            return videos
         else:
             print("Could not find ytInitialData in HTML")
-            return None
+            return []
     except Exception as e:
         print(f"Error fetching channel page: {e}")
-        return None
+        return []
+
+
+def get_video_details(video_url):
+    video_id = video_url.split('v=')[1].split('&')[0]
+    title = 'Unknown'
+    channel_name = 'Unknown'
+    try:
+        print("Fetching video page")
+        response = requests.get(video_url)
+        html = response.text
+
+        match = re.search(r'var ytInitialData = ({.*?});', html, re.DOTALL)
+        if match:
+            data = json.loads(match.group(1))
+            # Title
+            try:
+                primary_info = data['contents']['twoColumnWatchNextResults']['results']['results']['contents'][0]['videoPrimaryInfoRenderer']
+                title_runs = primary_info['title']['runs']
+                title = title_runs[0]['text'] if title_runs else title
+            except (KeyError, IndexError):
+                print("Could not parse title from JSON")
+            # Channel name
+            try:
+                secondary_info = data['contents']['twoColumnWatchNextResults']['results']['results']['contents'][1]['videoSecondaryInfoRenderer']
+                channel_runs = secondary_info['owner']['videoOwnerRenderer']['title']['runs']
+                channel_name = channel_runs[0]['text'] if channel_runs else channel_name
+            except (KeyError, IndexError):
+                print("Could not parse channel name from JSON")
+            print(f"Video ID: {video_id}, Title: {title}, Channel: {channel_name}")
+        else:
+            print("Could not find ytInitialData in HTML")
+    except Exception as e:
+        print(f"Error fetching video page: {e}")
+    return video_id, title, channel_name
 
 def get_transcript(video_id):
     try:
@@ -98,16 +114,69 @@ def get_transcript(video_id):
         # Try English first
         fetched = ytt_api.fetch(video_id, languages=['en'])
         print("Fetched English transcript")
-        return " ".join([snippet.text for snippet in fetched])
+        transcript = " ".join([snippet.text for snippet in fetched])
+        time.sleep(10)  # Rate limiting for YouTube API
+        return transcript
     except:
         try:
             # Fall back to any available (auto-generated)
             fetched = ytt_api.fetch(video_id)
             print("Fetched transcript (auto-generated or other language)")
-            return " ".join([snippet.text for snippet in fetched])
+            transcript = " ".join([snippet.text for snippet in fetched])
+            time.sleep(10)  # Rate limiting for YouTube API
+            return transcript
         except Exception as e:
             print(f"Error fetching transcript: {e}")
             return None
+
+
+def process_video(video_id, title, channel_name):
+    # Sanitize title for folder name
+    title_folder = re.sub(r'[<>:"/\\|?*]', '_', title)
+    
+    # Create directory structure
+    video_dir = os.path.join('channels', channel_name, title_folder)
+    os.makedirs(video_dir, exist_ok=True)
+    
+    summary_path = os.path.join(video_dir, 'summary.txt')
+    transcript_path = os.path.join(video_dir, 'transcript.txt')
+    
+    if os.path.exists(summary_path):
+        print(f"Already processed: {title}")
+        return
+    
+    transcript = None
+    if os.path.exists(transcript_path):
+        with open(transcript_path, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if content != "No transcript available.":
+                transcript = content
+                print(f"Loaded existing transcript for {title}")
+            else:
+                print(f"No transcript available for {title}, skipping summary")
+                return
+    else:
+        transcript = get_transcript(video_id)
+        if transcript:
+            with open(transcript_path, 'w', encoding='utf-8') as f:
+                f.write(transcript)
+            print(f"Saved transcript to {transcript_path}")
+        else:
+            # Save placeholder for no transcript
+            placeholder = "No transcript available."
+            with open(transcript_path, 'w', encoding='utf-8') as f:
+                f.write(placeholder)
+            print(f"Saved placeholder to {transcript_path}")
+            print("No transcript available for the video.")
+            return
+    
+    # Summarize and save
+    summary = summarize_transcript(transcript)
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        f.write(summary)
+    print(f"Saved summary to {summary_path}")
+    print("Video Summary:")
+    print(summary)
 
 def summarize_transcript(transcript):
     if not transcript:
@@ -128,39 +197,31 @@ def summarize_transcript(transcript):
     return response.choices[0].message.content
 
 if __name__ == "__main__":
-    result = get_latest_video_id(CHANNEL_URL)
-    if result:
-        video_id, title = result
-        transcript = get_transcript(video_id)
-        
-        # Sanitize title for folder name
-        title_folder = re.sub(r'[<>:"/\\|?*]', '_', title)
-        
-        # Create directory structure
-        video_dir = os.path.join('channels', CHANNEL_NAME, title_folder)
-        os.makedirs(video_dir, exist_ok=True)
-        
-        # Save transcript
-        transcript_path = os.path.join(video_dir, 'transcript.txt')
-        if transcript:
-            with open(transcript_path, 'w', encoding='utf-8') as f:
-                f.write(transcript)
-            print(f"Saved transcript to {transcript_path}")
-            
-            # Summarize and save
-            summary = summarize_transcript(transcript)
-            summary_path = os.path.join(video_dir, 'summary.txt')
-            with open(summary_path, 'w', encoding='utf-8') as f:
-                f.write(summary)
-            print(f"Saved summary to {summary_path}")
-            print("Video Summary:")
-            print(summary)
-        else:
-            # Save placeholder for no transcript
-            placeholder = "No transcript available."
-            with open(transcript_path, 'w', encoding='utf-8') as f:
-                f.write(placeholder)
-            print(f"Saved placeholder to {transcript_path}")
-            print("No transcript available for the latest video.")
+    if len(sys.argv) < 2:
+        print("Usage: python youtube_summarizer.py <channel_url or video_url>")
+        print("Example: python youtube_summarizer.py https://www.youtube.com/@PredictiveHistory")
+        print("Or: python youtube_summarizer.py https://www.youtube.com/watch?v=-jF9gW2r_bk")
+        sys.exit(1)
+    
+    input_url = sys.argv[1]
+    
+    if 'v=' in input_url:
+        # Video URL
+        print("Processing single video")
+        video_id, title, channel_name = get_video_details(input_url)
+        process_video(video_id, title, channel_name)
     else:
-        print("Could not fetch latest video ID from channel.")
+        # Channel URL
+        if not input_url.endswith('/videos'):
+            channel_url = input_url + '/videos'
+        else:
+            channel_url = input_url
+        channel_name = channel_url.split('/@')[1].split('/')[0]
+        print(f"Processing channel: {channel_name}")
+        videos = get_latest_n_videos(channel_url, n=5)
+        if videos:
+            for video_id, title in videos:
+                print(f"\n--- Processing video: {title} ---")
+                process_video(video_id, title, channel_name)
+        else:
+            print("No videos found in channel.")
