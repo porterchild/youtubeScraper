@@ -24,51 +24,97 @@ client = OpenAI(
 
 def get_latest_n_videos(channel_url, n=5):
     videos = []
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+    })
+
+    def extract_videos_from_contents(contents):
+        found = []
+        continuation_token = None
+        for item in contents:
+            if 'richItemRenderer' in item:
+                renderer = item['richItemRenderer'].get('content', {}).get('videoRenderer')
+                if renderer:
+                    video_id = renderer.get('videoId')
+                    if video_id:
+                        title_runs = renderer.get('title', {}).get('runs', [])
+                        title = title_runs[0]['text'] if title_runs else video_id
+                        found.append((video_id, title))
+            elif 'continuationItemRenderer' in item:
+                continuation_token = item['continuationItemRenderer']['continuationEndpoint']['continuationCommand']['token']
+        return found, continuation_token
+
     try:
         print("Fetching channel page")
-        response = requests.get(channel_url)
+        response = session.get(channel_url)
         html = response.text
 
         match = re.search(r'var ytInitialData = ({.*?});', html, re.DOTALL)
-        if match:
-            data = json.loads(match.group(1))
-            
-            # Navigate to the videos tab content
-            try:
-                tabs = data['contents']['twoColumnBrowseResultsRenderer']['tabs']
-                # Find the "Videos" tab (usually index 1, but let's be safe)
-                videos_tab = None
-                for tab in tabs:
-                    if 'tabRenderer' in tab and tab['tabRenderer'].get('title') == 'Videos':
-                        videos_tab = tab['tabRenderer']['content']
-                        break
-                
-                if not videos_tab:
-                    # Fallback to index 1 if title check fails
-                    videos_tab = tabs[1]['tabRenderer']['content']
-                
-                contents = videos_tab['richGridRenderer']['contents']
-                
-                for item in contents:
-                    if len(videos) >= n:
-                        break
-                        
-                    if 'richItemRenderer' in item:
-                        renderer = item['richItemRenderer'].get('content', {}).get('videoRenderer')
-                        if renderer:
-                            video_id = renderer.get('videoId')
-                            if video_id:
-                                title_runs = renderer.get('title', {}).get('runs', [])
-                                title = title_runs[0]['text'] if title_runs else video_id
-                                print(f"Found video ID: {video_id}, Title: {title}")
-                                videos.append((video_id, title))
-            except (KeyError, IndexError) as e:
-                print(f"Error navigating channel JSON: {e}")
-            
-            return videos
-        else:
+        if not match:
             print("Could not find ytInitialData in HTML")
             return []
+
+        data = json.loads(match.group(1))
+        
+        # Get API key and client context for continuations
+        api_key = re.search(r'"INNERTUBE_API_KEY":"(.*?)"', html)
+        api_key = api_key.group(1) if api_key else None
+        client_version = re.search(r'"INNERTUBE_CONTEXT_CLIENT_VERSION":"(.*?)"', html)
+        client_version = client_version.group(1) if client_version else "2.20240101.01.00"
+
+        # Initial videos
+        try:
+            tabs = data['contents']['twoColumnBrowseResultsRenderer']['tabs']
+            videos_tab = next((t['tabRenderer']['content'] for t in tabs if 'tabRenderer' in t and t['tabRenderer'].get('title') == 'Videos'), None)
+            if not videos_tab:
+                videos_tab = tabs[1]['tabRenderer']['content']
+            
+            contents = videos_tab['richGridRenderer']['contents']
+            new_videos, token = extract_videos_from_contents(contents)
+            for v_id, v_title in new_videos:
+                if len(videos) < n:
+                    print(f"Found video ID: {v_id}, Title: {v_title}")
+                    videos.append((v_id, v_title))
+            
+            # Pagination
+            while len(videos) < n and token and api_key:
+                time.sleep(2)  # Delay between pagination requests
+                print(f"Fetching more videos (current count: {len(videos)})")
+                browse_url = f"https://www.youtube.com/youtubei/v1/browse?key={api_key}"
+                payload = {
+                    "context": {
+                        "client": {
+                            "clientName": "WEB",
+                            "clientVersion": client_version
+                        }
+                    },
+                    "continuation": token
+                }
+                resp = session.post(browse_url, json=payload)
+                if resp.status_code != 200:
+                    break
+                
+                cont_data = resp.json()
+                # Continuation response structure is different
+                # onResponseReceivedActions -> appendContinuationItemsAction -> continuationItems
+                actions = cont_data.get('onResponseReceivedActions', [])
+                if not actions:
+                    break
+                
+                cont_items = actions[0].get('appendContinuationItemsAction', {}).get('continuationItems', [])
+                new_videos, token = extract_videos_from_contents(cont_items)
+                for v_id, v_title in new_videos:
+                    if len(videos) < n:
+                        print(f"Found video ID: {v_id}, Title: {v_title}")
+                        videos.append((v_id, v_title))
+                    else:
+                        break
+                        
+        except (KeyError, IndexError, StopIteration) as e:
+            print(f"Error navigating channel JSON: {e}")
+        
+        return videos
     except Exception as e:
         print(f"Error fetching channel page: {e}")
         return []
@@ -275,8 +321,9 @@ if __name__ == "__main__":
         print(f"Processing channel: {channel_name}")
         videos = get_latest_n_videos(channel_url, n=n_latest)
         if videos:
-            for video_id, title in videos:
-                print(f"\n--- Processing video: {title} ---")
+            print(f"Found {len(videos)} videos to process.")
+            for i, (video_id, title) in enumerate(videos):
+                print(f"\n--- Processing video {i+1}/{len(videos)}: {title} ---")
                 process_video(video_id, title, channel_name, no_save)
         else:
             print("No videos found in channel.")
