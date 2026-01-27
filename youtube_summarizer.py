@@ -32,41 +32,39 @@ def get_latest_n_videos(channel_url, n=5):
         match = re.search(r'var ytInitialData = ({.*?});', html, re.DOTALL)
         if match:
             data = json.loads(match.group(1))
-            print("Top level keys:", list(data.keys()))
-            browse_results = data['contents']['twoColumnBrowseResultsRenderer']
-            print("Browse results keys:", list(browse_results.keys()))
-            tabs = browse_results['tabs']
-            print("Number of tabs:", len(tabs))
-            videos_tab = tabs[1]['tabRenderer']['content']
-            print("Videos tab content keys:", list(videos_tab.keys()))
-            rich_grid = videos_tab['richGridRenderer']
-            print("Rich grid keys:", list(rich_grid.keys()))
-            contents = rich_grid['contents']
-            print("Number of contents:", len(contents))
-            for i, item in enumerate(contents[:n]):
-                print(f"Item {i} type: {list(item.keys())}")
-                if 'richItemRenderer' in item:
-                    rich_item = item['richItemRenderer']
-                    print(f"Item {i} rich_item keys: {list(rich_item.keys())}")
-                    if 'content' in rich_item:
-                        renderer = rich_item['content']
-                        print(f"Item {i} renderer keys: {list(renderer.keys())}")
-                        if 'videoRenderer' in renderer:
-                            video_renderer = renderer['videoRenderer']
-                            video_id = video_renderer.get('videoId')
+            
+            # Navigate to the videos tab content
+            try:
+                tabs = data['contents']['twoColumnBrowseResultsRenderer']['tabs']
+                # Find the "Videos" tab (usually index 1, but let's be safe)
+                videos_tab = None
+                for tab in tabs:
+                    if 'tabRenderer' in tab and tab['tabRenderer'].get('title') == 'Videos':
+                        videos_tab = tab['tabRenderer']['content']
+                        break
+                
+                if not videos_tab:
+                    # Fallback to index 1 if title check fails
+                    videos_tab = tabs[1]['tabRenderer']['content']
+                
+                contents = videos_tab['richGridRenderer']['contents']
+                
+                for item in contents:
+                    if len(videos) >= n:
+                        break
+                        
+                    if 'richItemRenderer' in item:
+                        renderer = item['richItemRenderer'].get('content', {}).get('videoRenderer')
+                        if renderer:
+                            video_id = renderer.get('videoId')
                             if video_id:
-                                title_runs = video_renderer.get('title', {}).get('runs', [])
+                                title_runs = renderer.get('title', {}).get('runs', [])
                                 title = title_runs[0]['text'] if title_runs else video_id
                                 print(f"Found video ID: {video_id}, Title: {title}")
                                 videos.append((video_id, title))
-                            else:
-                                print(f"Item {i} no videoId in videoRenderer")
-                        else:
-                            print(f"Item {i} no videoRenderer in renderer")
-                    else:
-                        print(f"Item {i} no content in rich_item")
-                else:
-                    print(f"Item {i} is not richItemRenderer: {list(item.keys())}")
+            except (KeyError, IndexError) as e:
+                print(f"Error navigating channel JSON: {e}")
+            
             return videos
         else:
             print("Could not find ytInitialData in HTML")
@@ -80,40 +78,24 @@ def get_video_details(video_url):
     video_id = video_url.split('v=')[1].split('&')[0]
     title = 'Unknown'
     channel_name = 'Unknown'
+    
     try:
-        print("Fetching video page")
-        response = requests.get(video_url)
-        html = response.text
-
-        match = re.search(r'var ytInitialData = ({.*?});', html, re.DOTALL)
-        if match:
-            data = json.loads(match.group(1))
-            # Title
-            try:
-                primary_info = data['contents']['twoColumnWatchNextResults']['results']['results']['contents'][0]['videoPrimaryInfoRenderer']
-                title_runs = primary_info['title']['runs']
-                title = title_runs[0]['text'] if title_runs else title
-            except (KeyError, IndexError):
-                print("Could not parse title from JSON")
-            # Channel name - prefer handle from canonicalBaseUrl
-            try:
-                secondary_info = data['contents']['twoColumnWatchNextResults']['results']['results']['contents'][1]['videoSecondaryInfoRenderer']
-                video_owner_renderer = secondary_info['owner']['videoOwnerRenderer']
-                # Try to get handle
-                try:
-                    nav = video_owner_renderer['navigationEndpoint']['browseEndpoint']['canonicalBaseUrl']
-                    channel_name = nav.lstrip('/@')
-                except (KeyError, IndexError):
-                    # Fallback to display name
-                    channel_runs = video_owner_renderer['title']['runs']
-                    channel_name = channel_runs[0]['text'] if channel_runs else 'Unknown'
-            except (KeyError, IndexError):
-                print("Could not parse channel name from JSON")
+        print("Fetching video metadata via oEmbed")
+        oembed_url = f"https://www.youtube.com/oembed?url={video_url}&format=json"
+        response = requests.get(oembed_url)
+        if response.status_code == 200:
+            data = response.json()
+            title = data.get('title', title)
+            channel_name = data.get('author_name', channel_name)
+            # If it's a handle URL, try to extract the handle
+            author_url = data.get('author_url', '')
+            if '/@' in author_url:
+                channel_name = author_url.split('/@')[-1]
+            
             print(f"Video ID: {video_id}, Title: {title}, Channel: {channel_name}")
-        else:
-            print("Could not find ytInitialData in HTML")
     except Exception as e:
-        print(f"Error fetching video page: {e}")
+        print(f"oEmbed failed: {e}")
+
     return video_id, title, channel_name
 
 def get_transcript(video_id):
