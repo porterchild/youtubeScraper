@@ -3,7 +3,8 @@ import time
 import requests
 import json
 import re
-import sys
+import argparse
+import re
 from dotenv import load_dotenv
 from youtube_transcript_api import YouTubeTranscriptApi
 import httpx
@@ -94,11 +95,18 @@ def get_video_details(video_url):
                 title = title_runs[0]['text'] if title_runs else title
             except (KeyError, IndexError):
                 print("Could not parse title from JSON")
-            # Channel name
+            # Channel name - prefer handle from canonicalBaseUrl
             try:
                 secondary_info = data['contents']['twoColumnWatchNextResults']['results']['results']['contents'][1]['videoSecondaryInfoRenderer']
-                channel_runs = secondary_info['owner']['videoOwnerRenderer']['title']['runs']
-                channel_name = channel_runs[0]['text'] if channel_runs else channel_name
+                video_owner_renderer = secondary_info['owner']['videoOwnerRenderer']
+                # Try to get handle
+                try:
+                    nav = video_owner_renderer['navigationEndpoint']['browseEndpoint']['canonicalBaseUrl']
+                    channel_name = nav.lstrip('/@')
+                except (KeyError, IndexError):
+                    # Fallback to display name
+                    channel_runs = video_owner_renderer['title']['runs']
+                    channel_name = channel_runs[0]['text'] if channel_runs else 'Unknown'
             except (KeyError, IndexError):
                 print("Could not parse channel name from JSON")
             print(f"Video ID: {video_id}, Title: {title}, Channel: {channel_name}")
@@ -130,12 +138,22 @@ def get_transcript(video_id):
             return None
 
 
-def process_video(video_id, title, channel_name):
+def process_video(video_id, title, channel_name, no_save=False):
+    if no_save:
+        transcript = get_transcript(video_id)
+        if transcript:
+            summary = summarize_transcript(transcript)
+            print(f"Video Summary for {title}:")
+            print(summary)
+        else:
+            print(f"No transcript available for {title}")
+        return
+    
     # Sanitize title for folder name
     title_folder = re.sub(r'[<>:"/\\|?*]', '_', title)
     
-    # Create directory structure
-    video_dir = os.path.join('channels', channel_name, title_folder)
+    # Create directory structure with lowercase channel name
+    video_dir = os.path.join('channels', channel_name.lower(), title_folder)
     os.makedirs(video_dir, exist_ok=True)
     
     summary_path = os.path.join(video_dir, 'summary.txt')
@@ -175,53 +193,108 @@ def process_video(video_id, title, channel_name):
     with open(summary_path, 'w', encoding='utf-8') as f:
         f.write(summary)
     print(f"Saved summary to {summary_path}")
-    print("Video Summary:")
+    print("Video Summary:\n")
     print(summary)
 
 def summarize_transcript(transcript):
     if not transcript:
         return "No transcript available."
     
-    prompt = f"Summarize the narrative, ideas and key points from this YouTube video transcript in a concise paragraph. Emphasize the more unituitive or novel bits:\n\n{transcript}"
+    content_types_prompt = """Recognize what kind of video it is, and tailor your reponse to fit it.
+    Some of the common types are Descriptive (lays out a theory of some reality, or a worldview on a topic), Normative (says how something 'should' be), Predictive (predicts outcomes from assumptions and their interaction), Interpretive (casts data or events into a certain paradigm), Narrative (tells a story with plot points, imagery, emotions).
+    So if it's Descriptive content, show the claims, their evidence and mechanisms, analogies, counterevidence, etc, to present the descriptive theory underlying the content.
+        For example, a video on bureaucracy might look like this: 
+
+        Video Type: Descriptive
+        Central claims: Bureaucracy supresses innovation and creates totalitarianism
+
+        CLAIM: Bureaucracy supresses innovation
+            MECHANISM: Centralizes power and resists change to protect own interests
+            MECHANISM: Creates regulations that favor stability over experimentation
+            EVIDENCE: 19th-century China - regulated factories out of industrial dominance
+            EVIDENCE: Islamic Golden Age - clergy/nobility suppressed merchant innovation
+            EVIDENCE: Post-WWII Britain - state control over 2/3 of economy led to stagnation
+
+        CLAIM: Bureaucracy creates totalitarianism
+            MECHANISM: Needs to justify own power through expanded control
+            MECHANISM: Converts governance into "false religion" of infinite progress
+            EVIDENCE: French Revolution - bureaucratic uprising led to instability then Napoleon
+            EVIDENCE: Soviet Union - managerial class created total state control
+            EVIDENCE: Modern Britain - surveillance state, censorship, intimate life control
+        
+        ...ends with overall summary...
+        
+    In a similarly principled and structured way, for other video types:
+    If it's Normative, lay out the values, prescriptions, justifications, and trade-offs.
+    If it's Predictive, lay out the assumptions, their interactions, of course predictions, confidence, timeline, etc.
+    If it's Interpretive, show the frame, patterns, analogies, implications, etc.
+    If it's Narrative, tell a condensed version of the story and summarize the emphasis and experience.
+    Etc.
+    You aren't limited to these types of content. Whatever the type, represent its core ideas in a way that flows naturally for that type.
+    """
+
+    prompt = f"Summarize the video transcript. Ignore off-topic content like Patreon plugs, or sponsorships. Don't use markdown or tables.\n\n{content_types_prompt} \n\nHere is the transcript:\n\n{transcript}"
     
-    response = client.chat.completions.create(
-        model="deepseek/deepseek-chat-v3.1:free",
-        messages=[
-            {"role": "user", "content": prompt}
-        ]
-    )
-    
-    # Rate limiting: wait 10 seconds after API request
-    time.sleep(10)
-    
-    return response.choices[0].message.content
+    max_retries = 10
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="x-ai/grok-4.1-fast",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            # Rate limiting: wait 10 seconds after API request
+            time.sleep(10)
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            if "RateLimitError" in str(type(e)) or "429" in str(e):
+                if attempt < max_retries - 1:
+                    print(f"Rate limit hit, retrying in 5 seconds... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(5)
+                    continue
+                else:
+                    print(f"Max retries reached for summary generation: {e}")
+                    return "Summary generation failed after retries due to rate limit."
+            else:
+                print(f"Error generating summary: {e}")
+                return "Summary generation failed due to API error."
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python youtube_summarizer.py <channel_url or video_url>")
-        print("Example: python youtube_summarizer.py https://www.youtube.com/@PredictiveHistory")
-        print("Or: python youtube_summarizer.py https://www.youtube.com/watch?v=-jF9gW2r_bk")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="YouTube Transcript Summarizer")
+    parser.add_argument("url", help="Channel or video URL")
+    parser.add_argument("-n", "--no-save", action="store_true", help="Print summary without saving files")
+    parser.add_argument("--latest", type=int, default=5, help="Number of latest videos to process for channels (default: 5)")
+    args = parser.parse_args()
     
-    input_url = sys.argv[1]
+    input_url = args.url
+    no_save = args.no_save
+    n_latest = args.latest
     
     if 'v=' in input_url:
         # Video URL
         print("Processing single video")
         video_id, title, channel_name = get_video_details(input_url)
-        process_video(video_id, title, channel_name)
+        process_video(video_id, title, channel_name, no_save)
     else:
         # Channel URL
         if not input_url.endswith('/videos'):
             channel_url = input_url + '/videos'
         else:
             channel_url = input_url
-        channel_name = channel_url.split('/@')[1].split('/')[0]
+        match = re.search(r'youtube\.com/(?:@)?([^/]+)', channel_url)
+        if match:
+            channel_name = match.group(1)
+        else:
+            print("Could not extract channel name from URL")
+            sys.exit(1)
         print(f"Processing channel: {channel_name}")
-        videos = get_latest_n_videos(channel_url, n=5)
+        videos = get_latest_n_videos(channel_url, n=n_latest)
         if videos:
             for video_id, title in videos:
                 print(f"\n--- Processing video: {title} ---")
-                process_video(video_id, title, channel_name)
+                process_video(video_id, title, channel_name, no_save)
         else:
             print("No videos found in channel.")
