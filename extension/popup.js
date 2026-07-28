@@ -50,42 +50,13 @@ async function init() {
   $("summarize-btn").addEventListener("click", () => summarize(videoUrl));
 }
 
-async function summarize(videoUrl) {
-  const btn = $("summarize-btn");
+function summarize(videoUrl) {
   const save = $("save-checkbox").checked;
-
-  btn.disabled = true;
-  btn.textContent = "Working...";
-  clearStatus();
-  $("result").classList.add("hidden");
-  setStatus(save ? "Summarizing and saving to channels/..." : "Summarizing (not saving)...");
-
-  try {
-    const res = await fetch(`${SERVER}/summary`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: videoUrl, save }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      setStatus(data.error || "Server error", true);
-      return;
-    }
-
-    clearStatus();
-    $("video-title").textContent = data.title || $("video-title").textContent;
-    $("cached-badge").classList.toggle("hidden", !data.cached);
-    $("saved-badge").classList.toggle("hidden", !data.saved);
-    $("summary-text").textContent = data.summary;
-    $("result").classList.remove("hidden");
-  } catch {
-    setStatus(`Could not reach server at ${SERVER}. Is server.py running?`, true);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Summarize";
-  }
+  const url = chrome.runtime.getURL(
+    `result.html?url=${encodeURIComponent(videoUrl)}&save=${save}`
+  );
+  chrome.tabs.create({ url, active: false });
+  window.close();
 }
 
 init();

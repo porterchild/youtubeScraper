@@ -94,6 +94,7 @@ function init() {
     return;
   }
 
+  $("video-url").href = videoUrl;
   $("video-url").textContent = videoUrl;
   $("summarize-btn").addEventListener("click", summarize);
   summarize();
