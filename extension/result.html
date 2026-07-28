@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>YT Summarizer</title>
+  <link rel="stylesheet" href="result.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <span class="logo">&#9654;</span>
+      <span class="title">YT Summarizer</span>
+    </header>
+
+    <main>
+      <div id="video-meta">
+        <div class="label">Video</div>
+        <div id="video-url" class="meta-url">—</div>
+      </div>
+
+      <button id="summarize-btn">Summarize</button>
+
+      <div id="status" class="status hidden"></div>
+
+      <div id="result" class="hidden">
+        <div class="label">
+          Summary
+          <span id="cached-badge" class="badge hidden">cached</span>
+          <span id="saved-badge" class="badge hidden">saved</span>
+        </div>
+        <div id="video-title" class="result-title hidden"></div>
+        <pre id="summary-text"></pre>
+        <button id="save-now-btn" class="hidden">Changed my mind, save it</button>
+      </div>
+    </main>
+  </div>
+  <script src="result.js"></script>
+</body>
+</html>

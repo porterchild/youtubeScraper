@@ -1,0 +1,158 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  background: #0f0f0f;
+  color: #e8e8e8;
+  width: 380px;
+  min-height: 80px;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid #222;
+}
+
+.logo {
+  color: #ff4444;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  flex: 1;
+}
+
+
+.section {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-bottom: 1px solid #1a1a1a;
+}
+.section:last-child { border-bottom: none; }
+
+.hidden { display: none !important; }
+
+.muted {
+  color: #666;
+  line-height: 1.5;
+}
+
+.label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #666;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meta-value {
+  font-size: 13px;
+  color: #ccc;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+button#summarize-btn {
+  background: #ff4444;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex: 1;
+  transition: background 0.15s;
+}
+button#summarize-btn:hover { background: #e03333; }
+button#summarize-btn:disabled {
+  background: #2a2a2a;
+  color: #555;
+  cursor: default;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #888;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.checkbox-label input[type="checkbox"] {
+  accent-color: #ff4444;
+  cursor: pointer;
+  width: 13px;
+  height: 13px;
+}
+
+.status {
+  font-size: 12px;
+  color: #888;
+  text-align: center;
+  line-height: 1.4;
+}
+.status.error { color: #ff6b6b; }
+.status.ok { color: #6bff8a; }
+
+#result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.badge {
+  background: #252525;
+  color: #888;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+pre#summary-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #ddd;
+  background: #1a1a1a;
+  border: 1px solid #252525;
+  border-radius: 4px;
+  padding: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}

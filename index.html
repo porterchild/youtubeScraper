@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube Video Summarizer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; justify-content: center; padding: 40px 20px; }
+  .container { max-width: 720px; width: 100%; }
+  h1 { font-size: 1.6rem; margin-bottom: 8px; color: #fff; }
+  .subtitle { color: #aaa; margin-bottom: 24px; font-size: 0.9rem; }
+  .input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .input-row input { flex: 1; padding: 10px 14px; border: 1px solid #333; border-radius: 6px; background: #16213e; color: #e0e0e0; font-size: 0.95rem; outline: none; }
+  .input-row input:focus { border-color: #0f3460; }
+  .input-row input::placeholder { color: #666; }
+  .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 600; }
+  .btn-primary { background: #0f3460; color: #fff; }
+  .btn-primary:hover { background: #1a5276; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-success { background: #27ae60; color: #fff; }
+  .btn-success:hover { background: #2ecc71; }
+  .btn-save { background: #e67e22; color: #fff; }
+  .btn-save:hover { background: #f39c12; }
+  .options { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; font-size: 0.9rem; }
+  .options label { cursor: pointer; display: flex; align-items: center; gap: 4px; }
+  .options input[type="checkbox"] { accent-color: #0f3460; }
+  .result { margin-top: 20px; }
+  .meta { background: #16213e; padding: 12px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; }
+  .meta strong { color: #fff; }
+  .meta .label { color: #888; }
+  .summary-box { background: #16213e; padding: 20px; border-radius: 6px; white-space: pre-wrap; line-height: 1.6; font-size: 0.95rem; min-height: 100px; }
+  .error { color: #e74c3c; margin-top: 12px; }
+  .loading { color: #f39c12; margin-top: 12px; }
+  .bookmarklet-section { margin-top: 40px; padding-top: 24px; border-top: 1px solid #333; }
+  .bookmarklet-section h2 { font-size: 1.1rem; margin-bottom: 8px; color: #fff; }
+  .bookmarklet-link { display: inline-block; padding: 8px 16px; background: #0f3460; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; cursor: move; margin: 8px 0; }
+  .bookmarklet-link:hover { background: #1a5276; }
+  .bookmarklet-instructions { color: #aaa; font-size: 0.85rem; line-height: 1.5; }
+  code { background: #0d0d1a; padding: 2px 6px; border-radius: 3px; font-size: 0.85rem; }
+  .action-row { display: flex; gap: 8px; margin-top: 12px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🎬 YouTube Summarizer</h1>
+  <p class="subtitle">Paste a YouTube video URL or ID to get an AI-generated summary.</p>
+
+  <div class="input-row">
+    <input type="text" id="input" placeholder="Video URL or ID (e.g. https://youtube.com/watch?v=... or dQw4w9WgXcQ)" autofocus>
+    <button class="btn btn-primary" id="summarizeBtn" onclick="summarize()">Summarize</button>
+  </div>
+
+  <div class="options">
+    <label><input type="checkbox" id="saveCheckbox" checked> Save to disk</label>
+  </div>
+
+  <div id="loading" class="loading hidden">⏳ Summarizing… (this may take a minute)</div>
+  <div id="error" class="error hidden"></div>
+
+  <div class="result hidden" id="result">
+    <div class="meta" id="meta"></div>
+    <div class="summary-box" id="summary"></div>
+    <div class="action-row" id="actions">
+      <button class="btn btn-save hidden" id="saveBtn" onclick="saveToDisk()">💾 Save to Disk</button>
+    </div>
+  </div>
+
+  <div class="bookmarklet-section">
+    <h2>🔖 One-Click Bookmarklet</h2>
+    <p class="bookmarklet-instructions">
+      Drag the link below to your bookmarks bar. When you're on a YouTube video page,
+      click the bookmark to instantly summarize the video you're watching.
+    </p>
+    <a class="bookmarklet-link" id="bookmarklet" href="javascript:(function(){const%20id=new%20URLSearchParams(window.location.search).get('v')||window.location.pathname.match(/^\/([\w-]{11})/)?.[1];if(!id){alert('Not on a YouTube video page.');return;}fetch('http://localhost:7823/summary',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video_id:id,save:true})}).then(r=>r.json()).then(d=>{if(d.summary)alert('Summary for: '+d.title+'\n\n'+d.summary);else alert('Error: '+(d.error||'Unknown'));}).catch(()=>alert('Server not running on port 7823.'));})();">📺 Summarize This Video</a>
+    <p class="bookmarklet-instructions" style="margin-top: 8px;">
+      Alternatively, you can also use this JavaScript snippet as a userscript or in the browser console:
+    </p>
+    <code style="display:block;padding:12px;margin-top:6px;white-space:pre-wrap;word-break:break-all;">const id = new URLSearchParams(window.location.search).get('v') || window.location.pathname.match(/^\/([\w-]{11})/)?.[1];
+if (!id) { alert('Not on a YouTube video page.'); } else {
+  fetch('http://localhost:7823/summary', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({video_id: id, save: true})
+  }).then(r => r.json()).then(d => {
+    if (d.summary) alert('Summary for: ' + d.title + '\n\n' + d.summary);
+    else alert('Error: ' + (d.error || 'Unknown'));
+  }).catch(() => alert('Server not running on port 7823.'));
+}</code>
+  </div>
+</div>
+
+<script>
+let _lastVideoId = null;
+
+function summarize() {
+  const input = document.getElementById('input').value.trim();
+  if (!input) { showError('Please enter a video URL or ID.'); return; }
+
+  const save = document.getElementById('saveCheckbox').checked;
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('error').classList.add('hidden');
+  document.getElementById('result').classList.add('hidden');
+  document.getElementById('summarizeBtn').disabled = true;
+
+  // Determine if it's a URL or bare ID
+  const body = input.includes('youtube.com') || input.includes('youtu.be')
+    ? JSON.stringify({ url: input, save })
+    : JSON.stringify({ video_id: input, save });
+
+  fetch('/summary', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body
+  })
+  .then(r => r.json())
+  .then(d => {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('summarizeBtn').disabled = false;
+    if (d.error) { showError(d.error); return; }
+    _lastVideoId = d.video_id;
+    displayResult(d);
+  })
+  .catch(err => {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('summarizeBtn').disabled = false;
+    showError('Network error: ' + err.message);
+  });
+}
+
+function displayResult(d) {
+  const saved = d.saved ? '✅ Saved' : '❌ Not saved';
+  document.getElementById('meta').innerHTML = `
+    <strong>${d.title}</strong><br>
+    <span class="label">Channel:</span> ${d.channel} &nbsp;|&nbsp;
+    <span class="label">Video ID:</span> ${d.video_id}<br>
+    <span class="label">Status:</span> ${saved} ${d.cached ? '(cached)' : ''}
+  `;
+  document.getElementById('summary').textContent = d.summary || 'No summary available.';
+  document.getElementById('result').classList.remove('hidden');
+
+  if (!d.saved && d.video_id) {
+    document.getElementById('saveBtn').classList.remove('hidden');
+  } else {
+    document.getElementById('saveBtn').classList.add('hidden');
+  }
+}
+
+function saveToDisk() {
+  if (!_lastVideoId) return;
+  document.getElementById('saveBtn').disabled = true;
+  fetch('/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ video_id: _lastVideoId })
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.saved) {
+      document.getElementById('saveBtn').textContent = '✅ Saved!';
+      document.getElementById('saveBtn').classList.remove('btn-save');
+    } else {
+      showError(d.error || 'Save failed');
+      document.getElementById('saveBtn').disabled = false;
+    }
+  })
+  .catch(() => {
+    showError('Network error while saving');
+    document.getElementById('saveBtn').disabled = false;
+  });
+}
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = '❌ ' + msg;
+  el.classList.remove('hidden');
+}
+
+// Allow Enter key to submit
+document.getElementById('input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') summarize();
+});
+</script>
+</body>
+</html>

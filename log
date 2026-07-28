@@ -1,0 +1,6 @@
+Starting server on http://localhost:7823
+Fetching video metadata via oEmbed
+Video ID: 690AshO8ewY, Title: Tesla Robotaxi is FINALLY "Unsupervised", Channel: AIDRIVR
+Fetched English transcript
+[server] "POST /summary HTTP/1.1" 200 -
+[server] "POST /summary HTTP/1.1" 500 -

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>YT Summarizer</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <span class="logo">&#9654;</span>
+      <span class="title">YT Summarizer</span>
+    </header>
+
+    <!-- Not a YouTube video -->
+    <div id="not-youtube" class="section hidden">
+      <p class="muted">Open a YouTube video to summarize it.</p>
+    </div>
+
+    <!-- Main view -->
+    <div id="main-view" class="section hidden">
+      <div id="video-meta">
+        <div class="label">Video</div>
+        <div id="video-title" class="meta-value">—</div>
+      </div>
+
+      <div class="action-row">
+        <button id="summarize-btn">Summarize</button>
+        <label class="checkbox-label">
+          <input type="checkbox" id="save-checkbox" />
+          Save
+        </label>
+      </div>
+
+      <div id="status" class="status hidden"></div>
+
+      <div id="result" class="hidden">
+        <div class="label">
+          Summary
+          <span id="cached-badge" class="badge hidden">cached</span>
+          <span id="saved-badge" class="badge hidden">saved</span>
+        </div>
+        <pre id="summary-text"></pre>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
