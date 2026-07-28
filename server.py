@@ -7,21 +7,6 @@ from youtube_summarizer import get_video_details, get_transcript, summarize_tran
 
 PORT = 7823
 
-
-def resolve_video_id(video_url_or_id):
-    """Extract video_id from a YouTube URL, or return bare ID as-is."""
-    if not video_url_or_id:
-        return None
-    # If it looks like a full URL, extract v= parameter
-    if "youtube.com" in video_url_or_id or "youtu.be" in video_url_or_id:
-        match = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', video_url_or_id)
-        if match:
-            return match.group(1)
-    # If it's an 11-char alphanumeric ID, use directly
-    if re.match(r'^[a-zA-Z0-9_-]{11}$', video_url_or_id):
-        return video_url_or_id
-    return None
-
 # In-memory cache keyed by video_id so /save can flush without re-fetching
 _cache = {}  # video_id -> {title, channel_name, transcript, summary, video_dir, ...}
 
@@ -52,13 +37,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
-    def do_GET(self):
-        path = urlparse(self.path).path
-        if path == "/" or path == "/index.html":
-            self._serve_html("index.html")
-        else:
-            self.send_json(404, {"error": "Not found"})
-
     def do_POST(self):
         path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length", 0))
@@ -75,42 +53,16 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_json(404, {"error": "Not found"})
 
-    def _serve_html(self, filename):
-        try:
-            with open(filename, "r", encoding="utf-8") as f:
-                content = f.read()
-            body = content.encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        except FileNotFoundError:
-            self.send_json(404, {"error": "Page not found"})
-
     def _handle_summary(self, data):
         video_url = data.get("url")
-        video_id = data.get("video_id")
         save = bool(data.get("save", False))
 
-        # Accept either url or video_id
-        raw = video_url or video_id
-        if not raw:
-            self.send_json(400, {"error": "Missing 'url' or 'video_id'"})
-            return
-
-        resolved_id = resolve_video_id(raw)
-        if not resolved_id:
-            self.send_json(400, {"error": "Could not parse video ID from input"})
+        if not video_url:
+            self.send_json(400, {"error": "Missing 'url'"})
             return
 
         try:
-            # If a full URL was given, use it for metadata; otherwise build a URL from the ID
-            if video_url and ("youtube.com" in video_url or "youtu.be" in video_url):
-                fetch_url = video_url
-            else:
-                fetch_url = f"https://www.youtube.com/watch?v={resolved_id}"
-            video_id, title, channel_name = get_video_details(fetch_url)
+            video_id, title, channel_name = get_video_details(video_url)
             video_dir, summary_path, transcript_path = video_dir_paths(channel_name, title)
 
             # Return cached summary if it exists on disk
