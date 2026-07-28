@@ -267,7 +267,7 @@ def summarize_transcript(transcript):
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(
-                model="x-ai/grok-4.1-fast",
+                model="deepseek/deepseek-v4-flash",
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
